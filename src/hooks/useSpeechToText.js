@@ -46,11 +46,32 @@ function createWebSpeechStrategy() {
     // Sans ça, un appelant qui lit le transcript juste après stop()
     // pouvait lire une valeur pas encore à jour (event asynchrone du
     // navigateur vs lecture synchrone du code appelant).
+    // stop() retourne une Promise qui se résout soit quand `onend` arrive,
+    // soit après un délai de sécurité (Chrome Android ne déclenche pas
+    // toujours `onend` de façon fiable — sans ce filet, l'app restait
+    // bloquée indéfiniment sur "Enregistrement en cours...").
     stop() {
       return new Promise((resolve) => {
         if (!recognition) return resolve(latestTranscript);
-        recognition.onend = () => resolve(latestTranscript);
+
+        let resolved = false;
+        const finish = () => {
+          if (resolved) return;
+          resolved = true;
+          resolve(latestTranscript);
+        };
+
+        recognition.onend = finish;
         recognition.stop();
+
+        // Filet de sécurité : si onend n'arrive jamais, on continue quand
+        // même après 3 secondes avec le dernier texte capté.
+        setTimeout(() => {
+          if (!resolved) {
+            recognition.abort?.();
+            finish();
+          }
+        }, 3000);
       });
     },
   };
